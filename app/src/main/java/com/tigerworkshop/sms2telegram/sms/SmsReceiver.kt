@@ -19,22 +19,109 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
-
 class SmsReceiver : BroadcastReceiver() {
+
     private fun getSimCarrierName(context: Context, repository: SettingsRepository, slotIndex: Int): String? {
-        // Check if user has enabled "Show SIM Name" feature
-        if (!repository.isShowSimNameEnabled()) {
-            return null
+        if (!repository.isShowSimNameEnabled()) return null
+        if (ActivityCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_STATE) != PackageManager.PERMISSION_GRANTED) return null
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP_MR1) return null
+
+        try {
+            val subscriptionManager = getSystemService(context, SubscriptionManager::class.java)
+            if (subscriptionManager != null) {
+                val subscriptionInfoList = subscriptionManager.activeSubscriptionInfoList
+                if (subscriptionInfoList != null) {
+                    for (subscriptionInfo in subscriptionInfoList) {
+                        if (subscriptionInfo.simSlotIndex == slotIndex) {
+                            val carrierName = subscriptionInfo.carrierName?.toString()
+                            if (!carrierName.isNullOrBlank()) return carrierName
+                        }
+                    }
+                }
+            }
+        } catch (e: Exception) {
+            Log.e("SmsReceiver", "Error getting SIM carrier name", e)
         }
 
-        // Check if we have READ_PHONE_STATE permission
-        if (ActivityCompat.checkSelfPermission(
-                context,
-                Manifest.permission.READ_PHONE_STATE
-            ) != PackageManager.PERMISSION_GRANTED
-        ) {
-            return null
+        return null
+    }
+
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action != Telephony.Sms.Intents.SMS_RECEIVED_ACTION &&
+            intent.action != "android.provider.Telephony.SMS_DELIVER"
+        ) return
+
+        val appContext = context.applicationContext
+        val repository = SettingsRepository(appContext)
+        val outbox = PendingMessageOutbox(appContext)
+        val timeFormatter = SimpleDateFormat("yyyy-MM-dd HH:mm:ssZ", Locale.US)
+
+        fun notifyStatusUpdated() {
+            StatusUpdateBus.notifyUpdated()
         }
+
+        if (!repository.isForwardingEnabled()) {
+            repository.saveLastForwardStatus("${timeFormatter.format(Date())}: Forwarding disabled, SMS ignored")
+            notifyStatusUpdated()
+            return
+        }
+
+        if (repository.loadSettings() == null) {
+            repository.saveLastForwardStatus("${timeFormatter.format(Date())}: Incomplete settings: Missing API token or Chat ID")
+            notifyStatusUpdated()
+            return
+        }
+
+        val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent).orEmpty()
+        if (messages.isEmpty()) {
+            repository.saveLastForwardStatus("No SMS payload detected.")
+            notifyStatusUpdated()
+            return
+        }
+
+        val simSlotIndex = intent.extras?.getInt("android.telephony.extra.SLOT_INDEX", -1)
+            ?: intent.extras?.getInt("subscription", -1)
+            ?: -1
+            
+        val simCarrierName = getSimCarrierName(appContext, repository, simSlotIndex)
+
+        // originatingAddress ব্যবহার করা হয়েছে
+        val firstMsg = messages.firstOrNull()
+        val sender = firstMsg?.originatingAddress ?: firstMsg?.displayOriginatingAddress ?: "Unknown"
+
+        // messageBody ব্যবহার করা হয়েছে
+        val body = messages.joinToString(separator = "") { it.messageBody ?: it.displayMessageBody ?: "" }
+
+        if (body.isBlank()) {
+            Log.w("SmsReceiver", "Ignored SMS from $sender because body is empty")
+            return
+        }
+
+        val formattedMessage = buildString {
+            appendLine("From: $sender")
+            if (simCarrierName != null) {
+                appendLine("SIM: #$simSlotIndex - $simCarrierName")
+            } else {
+                appendLine("SIM: #$simSlotIndex")
+            }
+            appendLine("Time: ${timeFormatter.format(Date())}")
+            appendLine()
+            append(body)
+        }
+
+        outbox.enqueue(
+            sender = sender,
+            message = formattedMessage
+        )
+        val pendingCount = outbox.pendingCount()
+        repository.saveLastForwardStatus(
+            "${timeFormatter.format(Date())} - From $sender - Queued for delivery. $pendingCount pending message(s)."
+        )
+        notifyStatusUpdated()
+
+        TelegramDeliveryWorker.enqueue(appContext)
+    }
+}        }
 
         // Only available on Android 5.1 (API 22) and above
         if (Build.VERSION.SDK_INT < Build.VERSION_CODES.LOLLIPOP_MR1) {
