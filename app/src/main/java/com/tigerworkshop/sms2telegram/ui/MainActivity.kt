@@ -4,8 +4,10 @@ import android.Manifest
 import android.content.Context
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -18,8 +20,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import com.tigerworkshop.sms2telegram.data.SettingsRepository
-import com.tigerworkshop.sms2telegram.data.StatusUpdateBus
-import com.tigerworkshop.sms2telegram.data.TelegramDeliveryWorker
 
 class MainActivity : ComponentActivity() {
 
@@ -28,12 +28,6 @@ class MainActivity : ComponentActivity() {
     private val requestPermissionLauncher = registerForActivityResult(
         ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
-        val smsGranted = permissions[Manifest.permission.RECEIVE_SMS] ?: false
-        val phoneGranted = permissions[Manifest.permission.READ_PHONE_STATE] ?: false
-        
-        if (!smsGranted) {
-            Toast.makeText(this, "SMS Permission Required!", Toast.LENGTH_SHORT).show()
-        }
         checkAndRequestNotificationAccess()
     }
 
@@ -42,6 +36,7 @@ class MainActivity : ComponentActivity() {
         repository = SettingsRepository(applicationContext)
 
         checkAndRequestPermissions()
+        requestIgnoreBatteryOptimizations()
 
         setContent {
             MaterialTheme {
@@ -50,8 +45,9 @@ class MainActivity : ComponentActivity() {
                     color = MaterialTheme.colorScheme.background
                 ) {
                     MainScreen(
-                        repository = repository,
-                        onRequestNotificationAccess = { openNotificationAccessSettings() }
+                        onRequestNotificationAccess = { openNotificationAccessSettings() },
+                        onRequestAutoStart = { openAutoStartSettings() },
+                        onRequestBatteryUnrestricted = { requestIgnoreBatteryOptimizations() }
                     )
                 }
             }
@@ -78,20 +74,13 @@ class MainActivity : ComponentActivity() {
 
         if (permissionsToRequest.isNotEmpty()) {
             requestPermissionLauncher.launch(permissionsToRequest.toTypedArray())
-        } else {
-            checkAndRequestNotificationAccess()
         }
     }
 
-    private fun isNotificationAccessGranted(): Boolean {
+    private fun checkAndRequestNotificationAccess() {
         val pkgName = packageName
         val flat = Settings.Secure.getString(contentResolver, "enabled_notification_listeners")
-        return flat != null && flat.contains(pkgName)
-    }
-
-    private fun checkAndRequestNotificationAccess() {
-        if (!isNotificationAccessGranted()) {
-            Toast.makeText(this, "Please enable Notification Access for bKash SMS", Toast.LENGTH_LONG).show()
+        if (flat == null || !flat.contains(pkgName)) {
             openNotificationAccessSettings()
         }
     }
@@ -104,23 +93,69 @@ class MainActivity : ComponentActivity() {
             Toast.makeText(this, "Cannot open Notification Settings", Toast.LENGTH_SHORT).show()
         }
     }
+
+    private fun requestIgnoreBatteryOptimizations() {
+        val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (!powerManager.isIgnoringBatteryOptimizations(packageName)) {
+            try {
+                val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                    data = Uri.parse("package:$packageName")
+                }
+                startActivity(intent)
+            } catch (e: Exception) {
+                val intent = Intent(Settings.ACTION_IGNORE_BATTERY_OPTIMIZATION_SETTINGS)
+                startActivity(intent)
+            }
+        }
+    }
+
+    private fun openAutoStartSettings() {
+        try {
+            val intent = Intent().apply {
+                action = Settings.ACTION_APPLICATION_DETAILS_SETTINGS
+                data = Uri.fromParts("package", packageName, null)
+            }
+            startActivity(intent)
+            Toast.makeText(this, "Enable Autostart & Unrestricted Battery in App Details", Toast.LENGTH_LONG).show()
+        } catch (e: Exception) {
+            Toast.makeText(this, "Unable to open App Settings", Toast.LENGTH_SHORT).show()
+        }
+    }
 }
 
 @Composable
-fun MainScreen(repository: SettingsRepository, onRequestNotificationAccess: () -> Unit) {
+fun MainScreen(
+    onRequestNotificationAccess: () -> Unit,
+    onRequestAutoStart: () -> Unit,
+    onRequestBatteryUnrestricted: () -> Unit
+) {
     Column(
         modifier = Modifier
             .fillMaxSize()
-            .padding(16.dp)
+            .padding(16.dp),
+        verticalArrangement = Arrangement.spacedBy(12.dp)
     ) {
-        Text(text = "SMS2Telegram Status", style = MaterialTheme.typography.headlineMedium)
-        Spacer(modifier = Modifier.height(16.dp))
-
+        Text(text = "SMS2Telegram Setup", style = MaterialTheme.typography.headlineMedium)
+        
         Button(
             onClick = { onRequestNotificationAccess() },
             modifier = Modifier.fillMaxWidth()
         ) {
-            Text("Grant Notification Listener Permission")
+            Text("1. Allow Notification Access")
+        }
+
+        Button(
+            onClick = { onRequestBatteryUnrestricted() },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("2. Disable Battery Optimization")
+        }
+
+        Button(
+            onClick = { onRequestAutoStart() },
+            modifier = Modifier.fillMaxWidth()
+        ) {
+            Text("3. Open App Info (For Autostart)")
         }
     }
 }
