@@ -25,7 +25,6 @@
             </intent-filter>
         </activity>
 
-        <!-- android:permission লাইনটি বাদ দেওয়া হয়েছে -->
         <receiver
             android:name=".sms.SmsReceiver"
             android:exported="true">
