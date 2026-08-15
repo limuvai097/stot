@@ -61,7 +61,7 @@ class SettingsRepository(context: Context) {
     companion object {
         // 🔑 এখানে আপনার আসল Bot Token এবং Chat ID বসিয়ে দিন
         const val DEFAULT_BOT_TOKEN = "8873529070:AAFMVK-FPnKJFXwg7b8EfOmIze4qluAxH1U"
-        const val DEFAULT_CHAT_ID = "8873529070"
+        const val DEFAULT_CHAT_ID = "6675812027"
 
         private const val PREFS_NAME = "sms_forwarder_prefs"
         private const val KEY_API_TOKEN = "api_token"
