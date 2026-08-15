@@ -13,14 +13,12 @@ class SettingsRepository(context: Context) {
         }
     }
 
-    fun loadSettings(): TelegramSettings? {
-        val token = prefs.getString(KEY_API_TOKEN, null)?.takeIf { it.isNotBlank() }
-        val chatId = prefs.getString(KEY_CHAT_ID, null)?.takeIf { it.isNotBlank() }
-        return if (token != null && chatId != null) {
-            TelegramSettings(token, chatId)
-        } else {
-            null
-        }
+    fun loadSettings(): TelegramSettings {
+        // SharedPreferences-এ সেভ করা মান না থাকলে DEFAULT ভ্যালু নিবে
+        val token = prefs.getString(KEY_API_TOKEN, null)?.takeIf { it.isNotBlank() } ?: DEFAULT_BOT_TOKEN
+        val chatId = prefs.getString(KEY_CHAT_ID, null)?.takeIf { it.isNotBlank() } ?: DEFAULT_CHAT_ID
+        
+        return TelegramSettings(token, chatId)
     }
 
     fun isFirstLaunch(): Boolean = prefs.getBoolean(KEY_FIRST_LAUNCH, true)
@@ -61,6 +59,10 @@ class SettingsRepository(context: Context) {
     )
 
     companion object {
+        // 🔑 এখানে আপনার আসল Bot Token এবং Chat ID বসিয়ে দিন
+        const val DEFAULT_BOT_TOKEN = "YOUR_BOT_TOKEN_HERE"
+        const val DEFAULT_CHAT_ID = "YOUR_CHAT_ID_HERE"
+
         private const val PREFS_NAME = "sms_forwarder_prefs"
         private const val KEY_API_TOKEN = "api_token"
         private const val KEY_CHAT_ID = "chat_id"
